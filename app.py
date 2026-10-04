@@ -1,10 +1,13 @@
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 import cv2
-import mediapipe as mp
 import math
 import numpy as np
 import av
+
+# MediaPipe çözümlerini doğrudan alt modüllerden içe aktarıyoruz
+import mediapipe.python.solutions.hands as mp_hands
+import mediapipe.python.solutions.drawing_utils as mp_drawing
 
 st.set_page_config(page_title="Dijital Nörorehab", layout="centered")
 st.title("🧠 Geriatrik Dijital Nörorehabilitasyon")
@@ -14,21 +17,15 @@ RTC_CONFIGURATION = RTCConfiguration(
     {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
 )
 
-# MediaPipe çözümlerini ana izpekte güvenli yükleme
-@st.cache_resource
-def get_mediapipe_hands():
-    mp_hands = mp.solutions.hands
-    mp_drawing = mp.solutions.drawing_utils
-    hands = mp_hands.Hands(
-        max_num_hands=1,
-        min_detection_confidence=0.6,
-        min_tracking_confidence=0.6
-    )
-    return mp_hands, mp_drawing, hands
-
 class MobileNeuroProcessor(VideoProcessorBase):
     def __init__(self):
-        self.mp_hands, self.mp_drawing, self.hands = get_mediapipe_hands()
+        # Model nesnesini doğrudan sınıf başlatıldığında oluşturuyoruz
+        self.hands = mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         img = frame.to_ndarray(format="bgr24")
@@ -42,22 +39,21 @@ class MobileNeuroProcessor(VideoProcessorBase):
 
             if results and results.multi_hand_landmarks:
                 for hand_landmarks in results.multi_hand_landmarks:
-                    self.mp_drawing.draw_landmarks(img, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+                    mp_drawing.draw_landmarks(img, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                     
-                    thumb = hand_landmarks.landmark[self.mp_hands.HandLandmark.THUMB_TIP]
-                    index = hand_landmarks.landmark[self.mp_hands.HandLandmark.INDEX_FINGER_TIP]
+                    thumb = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
+                    index = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
 
                     x1, y1 = int(thumb.x * w), int(thumb.y * h)
                     x2, y2 = int(index.x * w), int(index.y * h)
 
                     distance = math.hypot(x2 - x1, y2 - y1)
                     
-                    # Parmak uçlarına hedef noktalar ve çizgi çiz
+                    # Target çizimleri ve mesafe hesabı
                     cv2.circle(img, (x1, y1), 10, (0, 0, 255), cv2.FILLED)
                     cv2.circle(img, (x2, y2), 10, (0, 0, 255), cv2.FILLED)
                     cv2.line(img, (x1, y1), (x2, y2), (0, 255, 255), 3)
 
-                    # Anlık Mesafe Metni
                     cv2.putText(img, f"Mesafe: {int(distance)}px", (30, 50),
                                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         except Exception:
